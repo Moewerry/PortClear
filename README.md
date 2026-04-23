@@ -21,13 +21,29 @@ PortClear 是一个跨平台端口占用诊断与清理工具：
 python main.py
 ```
 
-如果安装了 `customtkinter`，会使用更现代的 GUI；未安装时自动回退到原生 `tkinter`。
+Windows 默认优先启动qwen3.6-plus任务栏托盘模式。右键托盘图标后，可以打开“快速查询端口”面板，输入端口号、查询占用，并选择需要终止的进程。
+
+如果只想打开完整窗口：
+
+```bash
+python main.py --gui
+```
+
+如果明确启动托盘模式：
+
+```bash
+python main.py --tray
+```
+
+如果安装了 `customtkinter`，完整窗口会使用更现代的 GUI；未安装时自动回退到原生 `tkinter`。
 
 建议安装：
 
 ```bash
-pip install customtkinter
+pip install -r requirements-windows.txt
 ```
+
+托盘模式依赖 `pystray` 和 `pillow`。如果没有安装，程序会自动回退到普通窗口模式。
 
 ### Linux
 
@@ -61,6 +77,9 @@ python3 main.py --port 8080 --verbose-hint
 Windows 可用 PyInstaller 打包：
 
 ```bash
-pip install pyinstaller
-pyinstaller -F -w main.py -n PortClear
+python -m pip install pyinstaller
+python -m pip install -r requirements-windows.txt
+python -m PyInstaller -F -w main.py -n PortClear
 ```
+
+如果 PowerShell 提示 `pyinstaller` 不是可识别命令，说明用户级 Scripts 目录没有加入 `PATH`。请优先使用上面的 `python -m PyInstaller ...` 写法，确保打包工具和当前 Python 环境一致。
