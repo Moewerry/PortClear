@@ -22,12 +22,13 @@ except ImportError:  # pragma: no cover
 
 
 class TrayApp:
-    def __init__(self) -> None:
+    def __init__(self, auto_open_quick_panel: bool = False) -> None:
         self.root = tk.Tk()
         self.root.withdraw()
         self.root.title("PortClear")
         self.icon = None
         self.main_window: tk.Toplevel | None = None
+        self.auto_open_quick_panel = auto_open_quick_panel
         self.quick_panel = QuickPanel(
             self.root,
             open_main_window=self.open_main_window,
@@ -48,6 +49,8 @@ class TrayApp:
 
         self.icon = pystray.Icon("PortClear", self._create_icon(), "PortClear", self._build_menu())
         threading.Thread(target=self.icon.run, daemon=True).start()
+        if self.auto_open_quick_panel:
+            self.root.after(250, self.open_quick_panel)
         self.root.mainloop()
         return 0
 
@@ -71,7 +74,7 @@ class TrayApp:
     def elevate(self) -> None:
         try:
             executable, parameters, workdir = _build_elevated_command()
-            ctypes.windll.shell32.ShellExecuteW(
+            result = ctypes.windll.shell32.ShellExecuteW(
                 None,
                 "runas",
                 executable,
@@ -79,6 +82,8 @@ class TrayApp:
                 workdir,
                 1,
             )
+            if result > 32:
+                self.quit()
         except Exception as exc:  # pragma: no cover
             self.root.after(0, lambda: messagebox.showerror("提权失败", str(exc)))
 
@@ -109,8 +114,8 @@ class TrayApp:
         return image
 
 
-def run_tray() -> int:
-    app = TrayApp()
+def run_tray(auto_open_quick_panel: bool = False) -> int:
+    app = TrayApp(auto_open_quick_panel=auto_open_quick_panel)
     return app.run()
 
 
@@ -120,11 +125,13 @@ def _build_elevated_command() -> tuple[str, str, str]:
         args = [arg for arg in sys.argv[1:] if arg != "--gui"]
         if "--tray" not in args:
             args.append("--tray")
+        if "--open-quick-panel" not in args:
+            args.append("--open-quick-panel")
         return sys.executable, subprocess.list2cmdline(args), str(Path(sys.executable).parent)
 
     pythonw = Path(sys.executable).with_name("pythonw.exe")
     executable = str(pythonw if pythonw.exists() else Path(sys.executable))
     project_root = Path(__file__).resolve().parents[1]
     main_script = project_root / "main.py"
-    args = [str(main_script), "--tray"]
+    args = [str(main_script), "--tray", "--open-quick-panel"]
     return executable, subprocess.list2cmdline(args), str(project_root)

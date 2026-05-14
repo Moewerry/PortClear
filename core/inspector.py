@@ -3,9 +3,10 @@ from __future__ import annotations
 import platform
 import re
 import subprocess
+import json
 from functools import lru_cache
 from itertools import islice
-from typing import Iterable, List, Optional
+from typing import Any, Iterable, List, Optional
 
 from core.models import OccupancyType, PortRecord
 from core.privilege import get_privilege_info
@@ -81,6 +82,12 @@ def build_advice(record: PortRecord) -> str:
 
 
 def _inspect_windows(requested_ports: Optional[set[int]] = None) -> List[PortRecord]:
+    privilege = get_privilege_info()
+    if privilege.is_elevated:
+        structured_records = _inspect_windows_powershell(requested_ports)
+        if structured_records is not None:
+            return structured_records
+
     result = subprocess.run(
         ["netstat", "-ano"],
         capture_output=True,
@@ -94,6 +101,102 @@ def _inspect_windows(requested_ports: Optional[set[int]] = None) -> List[PortRec
         if parsed and (not requested_ports or parsed.local_port in requested_ports):
             records.append(parsed)
     return records
+
+
+def _inspect_windows_powershell(requested_ports: Optional[set[int]] = None) -> Optional[List[PortRecord]]:
+    script = _build_windows_connection_script(requested_ports)
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="ignore",
+    )
+    if result.returncode != 0:
+        return None
+
+    stdout = result.stdout.strip()
+    if not stdout:
+        return []
+
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+
+    items: list[dict[str, Any]]
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        items = [payload]
+    else:
+        return None
+
+    records: List[PortRecord] = []
+    for item in items:
+        parsed = _parse_windows_powershell_item(item)
+        if parsed:
+            records.append(parsed)
+    return records
+
+
+def _build_windows_connection_script(requested_ports: Optional[set[int]] = None) -> str:
+    filter_clause = ""
+    if requested_ports:
+        ports_literal = ",".join(str(port) for port in sorted(requested_ports))
+        filter_clause = (
+            f"$ports = @({ports_literal});"
+            "$tcp = $tcp | Where-Object { $_.LocalPort -in $ports };"
+            "$udp = $udp | Where-Object { $_.LocalPort -in $ports };"
+        )
+
+    return (
+        "$ErrorActionPreference = 'Stop';"
+        "$tcp = @(Get-NetTCPConnection | Select-Object "
+        "@{Name='Protocol';Expression={'TCP'}},"
+        "LocalAddress,LocalPort,RemoteAddress,RemotePort,"
+        "@{Name='State';Expression={$_.State.ToString()}},"
+        "@{Name='OwningProcess';Expression={$_.OwningProcess}});"
+        "$udp = @(Get-NetUDPEndpoint | Select-Object "
+        "@{Name='Protocol';Expression={'UDP'}},"
+        "LocalAddress,LocalPort,"
+        "@{Name='RemoteAddress';Expression={'*'}},"
+        "@{Name='RemotePort';Expression={$null}},"
+        "@{Name='State';Expression={'BOUND'}},"
+        "@{Name='OwningProcess';Expression={$_.OwningProcess}});"
+        f"{filter_clause}"
+        "$result = @($tcp + $udp);"
+        "if ($result.Count -eq 0) { '[]' } else { $result | ConvertTo-Json -Compress -Depth 3 }"
+    )
+
+
+def _parse_windows_powershell_item(item: dict[str, Any]) -> Optional[PortRecord]:
+    protocol = str(item.get("Protocol", "")).upper()
+    if protocol not in {"TCP", "UDP"}:
+        return None
+
+    local_port = _coerce_int(item.get("LocalPort"))
+    if local_port is None:
+        return None
+
+    remote_port = _coerce_int(item.get("RemotePort"))
+    pid = _coerce_int(item.get("OwningProcess"))
+    local_address = _normalize_address(item.get("LocalAddress"))
+    remote_address = _normalize_address(item.get("RemoteAddress"), default="*")
+    state = str(item.get("State") or ("BOUND" if protocol == "UDP" else "UNKNOWN"))
+
+    return PortRecord(
+        protocol=protocol,
+        local_address=local_address,
+        local_port=local_port,
+        remote_address=remote_address,
+        remote_port=remote_port,
+        state=state,
+        pid=pid,
+        process_name="",
+        command="",
+        raw_line=json.dumps(item, ensure_ascii=False),
+    )
 
 
 def _inspect_linux(requested_ports: Optional[set[int]] = None) -> List[PortRecord]:
@@ -196,6 +299,20 @@ def _split_endpoint(endpoint: str) -> tuple[str, Optional[int]]:
         return host or "*", int(port_str)
     except ValueError:
         return endpoint, None
+
+
+def _coerce_int(value: Any) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_address(value: Any, default: str = "*") -> str:
+    text = str(value).strip() if value is not None else ""
+    return text or default
 
 
 def _extract_linux_process(process_info: str) -> tuple[Optional[int], str]:

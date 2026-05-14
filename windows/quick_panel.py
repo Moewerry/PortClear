@@ -164,6 +164,10 @@ class QuickPanel:
                     record.occupancy_type.value,
                 ),
             )
+        self.tree.selection_set("0")
+        self.tree.focus("0")
+        self.tree.see("0")
+        self.tree.focus_set()
         self._append_log(f"端口 {port} 查询完成，发现 {len(records)} 条记录。")
         self._set_query_enabled(True)
 
