@@ -3,6 +3,23 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# JavaScript and frontend artifacts
+node_modules/
+.pnpm-store/
+.vite/
+.vite-temp/
+package-lock.json
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Rust and Tauri artifacts
+target/
+src-tauri/target/
+src-tauri/gen/schemas/
+Tauri/src-tauri/gen/
+
 # Build and packaging artifacts
 build/
 dist/
@@ -40,6 +57,7 @@ htmlcov/
 # IDE and editor settings
 .idea/
 .vscode/
+.trae/
 *.code-workspace
 
 # OS files
@@ -47,5 +65,13 @@ htmlcov/
 Thumbs.db
 desktop.ini
 
-READ.md
+# Markdown docs
+*.md
+!README.md
+!**/README.md
+!**/READ.md
+
+# Documentation folders
 *docs/
+!Tkinter/docs/
+!Tkinter/docs/READ.md
